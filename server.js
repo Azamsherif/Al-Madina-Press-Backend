@@ -300,7 +300,7 @@ app.delete('/api/portfolio/:id', async (req, res) => {
         
         // Delete associated image if it's stored locally
         if (deletedItem.image && deletedItem.image.includes('/uploads/')) {
-            const imagePath = path.join(__dirname, deletedItem.image.replace('http://localhost:4000', ''));
+            const imagePath = path.join(__dirname, deletedItem.image.replace('https://al-madina-press-backend.onrender.com', ''));
             if (fs.existsSync(imagePath)) {
                 fs.unlinkSync(imagePath);
             }
@@ -323,7 +323,8 @@ app.post('/api/upload', upload.single('image'), (req, res) => {
             return res.status(400).json({ error: 'لم يتم رفع أي صورة' });
         }
         
-        const imageUrl = `http://localhost:${PORT}/uploads/${req.file.filename}`;
+        const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
+        const imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
         res.json({
             message: 'تم رفع الصورة بنجاح',
             url: imageUrl,
