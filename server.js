@@ -11,32 +11,12 @@ const PORT = process.env.PORT || 4000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Serve static files from uploads folder
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// Create uploads folder if not exists
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-// Configure multer for image upload
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, uploadsDir);
-    },
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-        const ext = path.extname(file.originalname);
-        cb(null, 'product-' + uniqueSuffix + ext);
-    }
-});
-
+// Configure multer to store in memory (for Base64 conversion)
 const upload = multer({
-    storage: storage,
+    storage: multer.memoryStorage(),
     limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
     fileFilter: (req, file, cb) => {
         const allowedTypes = /jpeg|jpg|png|gif|webp/;
@@ -48,6 +28,16 @@ const upload = multer({
         cb(new Error('Only image files are allowed!'));
     }
 });
+
+// Image Schema - Store images in MongoDB
+const imageSchema = new mongoose.Schema({
+    filename: { type: String, required: true },
+    data: { type: String, required: true }, // Base64 data
+    mimetype: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now }
+});
+
+const Image = mongoose.model('Image', imageSchema);
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGODB_URI)
@@ -298,11 +288,13 @@ app.delete('/api/portfolio/:id', async (req, res) => {
             return res.status(404).json({ error: 'المنتج غير موجود' });
         }
         
-        // Delete associated image if it's stored locally
-        if (deletedItem.image && deletedItem.image.includes('/uploads/')) {
-            const imagePath = path.join(__dirname, deletedItem.image.replace('https://al-madina-press-backend.onrender.com', ''));
-            if (fs.existsSync(imagePath)) {
-                fs.unlinkSync(imagePath);
+        // Delete associated image from MongoDB if it exists
+        if (deletedItem.image && deletedItem.image.includes('/api/images/')) {
+            try {
+                const imageId = deletedItem.image.split('/api/images/')[1];
+                await Image.findByIdAndDelete(imageId);
+            } catch (imgError) {
+                console.log('Could not delete image:', imgError.message);
             }
         }
         
@@ -317,22 +309,54 @@ app.delete('/api/portfolio/:id', async (req, res) => {
 // Image Upload Route
 // ========================
 
-app.post('/api/upload', upload.single('image'), (req, res) => {
+app.post('/api/upload', upload.single('image'), async (req, res) => {
     try {
         if (!req.file) {
             return res.status(400).json({ error: 'لم يتم رفع أي صورة' });
         }
         
+        // Convert buffer to Base64
+        const base64Data = req.file.buffer.toString('base64');
+        const filename = 'product-' + Date.now() + '-' + Math.round(Math.random() * 1E9);
+        
+        // Save to MongoDB
+        const newImage = new Image({
+            filename: filename,
+            data: base64Data,
+            mimetype: req.file.mimetype
+        });
+        
+        const savedImage = await newImage.save();
         const baseUrl = process.env.BASE_URL || `http://localhost:${PORT}`;
-        const imageUrl = `${baseUrl}/uploads/${req.file.filename}`;
+        const imageUrl = `${baseUrl}/api/images/${savedImage._id}`;
+        
         res.json({
             message: 'تم رفع الصورة بنجاح',
             url: imageUrl,
-            filename: req.file.filename
+            filename: filename
         });
     } catch (error) {
         console.error('Error uploading image:', error);
         res.status(500).json({ error: 'حدث خطأ أثناء رفع الصورة' });
+    }
+});
+
+// Serve images from MongoDB
+app.get('/api/images/:id', async (req, res) => {
+    try {
+        const image = await Image.findById(req.params.id);
+        if (!image) {
+            return res.status(404).json({ error: 'الصورة غير موجودة' });
+        }
+        
+        // Convert Base64 back to buffer and send
+        const imgBuffer = Buffer.from(image.data, 'base64');
+        res.set('Content-Type', image.mimetype);
+        res.set('Cache-Control', 'public, max-age=31536000'); // Cache for 1 year
+        res.send(imgBuffer);
+    } catch (error) {
+        console.error('Error fetching image:', error);
+        res.status(500).json({ error: 'حدث خطأ أثناء جلب الصورة' });
     }
 });
 

@@ -31,7 +31,14 @@ npm run dev
 ```env
 MONGODB_URI=mongodb+srv://your_connection_string
 PORT=4000
+BASE_URL=https://al-madina-press-backend.onrender.com
 ```
+
+## 🖼️ تخزين الصور
+الصور يتم تخزينها مباشرة في MongoDB كـ Base64.
+- لا حاجة لأي خدمة خارجية
+- الصور تبقى محفوظة حتى لو أُعيد تشغيل السيرفر
+- رابط الصور: `/api/images/:id`
 
 ## 🔗 الـ API Endpoints
 
